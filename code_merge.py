@@ -32,10 +32,11 @@ def merge_project_code(root_dir, output_file='code.merge.txt'):
     # 配置参数
     code_config = {
         'C++': {'.cpp', '.h', '.c'},
-        'C#': {'.cs'}
+        'C#': {'.cs', '.xaml', '.axaml'},
+        'python': {'.py'}
     }
     allowed_exts = {ext for exts in code_config.values() for ext in exts}
-    exclude_dirs = ['.vs', '.git', 'bin', 'obj']
+    exclude_dirs = ['.vs', '.git', 'bin', 'obj', '.venv']
     
     with open(output_file, 'w', encoding='utf-8') as f:
         # 生成目录树JSON
