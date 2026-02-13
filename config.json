@@ -1,0 +1,15 @@
+{
+    "allowed_exts":
+    [
+        ".cpp", ".h", ".c",
+        ".cs", ".xaml", ".axaml",
+        ".py",
+        ".css", ".js", ".html",
+        ".md"
+    ],
+    "default_exclude":
+    [
+        ".git", ".vs", ".venv", ".idea",
+        "bin", "obj",
+        "vendor"]
+}

@@ -1,0 +1,9 @@
+# Nuitka 编译生成的输出目录
+build_out/
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# uv 环境
+.venv/

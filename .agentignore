@@ -1,0 +1,7 @@
+.git/
+.vs/
+.venv/
+.idea/
+bin/
+obj/
+vendor/
