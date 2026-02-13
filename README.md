@@ -22,7 +22,13 @@
 | `config.json` | 配置 | 定义默认允许的扩展名（如 `.cpp`, `.py`, `.js` 等）及排除目录。 |
 | `.agentignore` | 配置 | 本项目的忽略示例，包含 `.git/`, `.venv/`, `bin/` 等路径 。|
 
-## 🚀 快速开始
+## 🚀 快速开始  
+
+### 直接下载执行 (Windows)  
+
+如果你是 Windows 用户，可以直接下载预编译的单文件版本，无需安装 Python 环境：
+
+👉 **[下载最新 Release 版本 (v2.0)](https://github.com/CRThu/CodeMerge/releases/download/v2.0/code_merge.v2.0.exe)**
 
 ### 开发环境运行
 
