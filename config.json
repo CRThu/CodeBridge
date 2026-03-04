@@ -5,11 +5,14 @@
         ".cs", ".xaml", ".axaml",
         ".py",
         ".css", ".js", ".html",
-        ".md"
+        ".md",
+        ".json", ".yaml", ".yml",
+        ".sh", ".bat", ".ps1"
     ],
     "default_exclude":
     [
-        ".git", ".vs", ".venv", ".idea",
+        ".git", ".vs", ".venv", ".idea", "__pycache__",
         "bin", "obj",
-        "vendor"]
+        "vendor", "build", "dist"
+    ]
 }
