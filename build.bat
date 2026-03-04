@@ -10,7 +10,7 @@ call uv run --python 3.12 --with nuitka --with pathspec python -m nuitka ^
     --python-flag=-OO ^
     --noinclude-setuptools-mode=nofollow ^
     --output-dir=build_out ^
-    code2context.py
+    CodeBridge.py
 
 if %errorlevel% equ 0 (
     echo [2/2] 编译成功！文件在 build_out 目录下。

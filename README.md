@@ -1,6 +1,6 @@
-# code2context: 面向大语言模型 (LLM) 的源代码上下文聚合工具
+# CodeBridge: 面向大语言模型 (LLM) 的源代码上下文聚合工具
 
-`code2context` 是一款面向 AI 开发者设计的源代码上下文管理工具。它能将复杂的项目工程自动化转化为结构化的单一文本（Context），并支持将 AI 生成的修改方案安全地应用回本地源码，实现“代码打包 -> AI 思考 -> 自动化同步”的完整闭环。
+`CodeBridge` 是一款面向 AI 开发者设计的源代码上下文管理工具。它能将复杂的项目工程自动化转化为结构化的单一文本（Context），并支持将 AI 生成的修改方案安全地应用回本地源码，实现“代码打包 -> AI 思考 -> 自动化同步”的完整闭环。
 
 ---
 
@@ -35,7 +35,7 @@
 👉 **[下载最新 Release 版本 (v2.0)](https://github.com/CRThu/CodeMerge/releases/download/v2.0/code_merge.v2.0.exe)**
 
 ### 交互模式 (推荐)
-直接双击 `code2context.exe` 或运行 `python code2context.py`（不带参数），根据屏幕提示进行：
+直接双击 `CodeBridge.exe` 或运行 `python CodeBridge.py`（不带参数），根据屏幕提示进行：
 1. 输入路径
 2. 选择模式 (全量/增量/应用)
 
@@ -44,19 +44,19 @@
 
 ```powershell
 # 全量打包
-uv run code2context.py [项目路径]
+uv run CodeBridge.py [项目路径]
 
 # 增量打包 (命令行直接传入 JSON 数组)
-uv run code2context.py [项目路径] --delta "['main.py', 'utils.py']"
+uv run CodeBridge.py [项目路径] --delta "['main.py', 'utils.py']"
 
 # 增量打包 (通过本地 JSON 文件读取列表)
-uv run code2context.py [项目路径] --delta list.json
+uv run CodeBridge.py [项目路径] --delta ai_change_list.json
 
 # 自动化应用 AI 的修改方案 (需要人工确认)
-uv run code2context.py [项目路径] --apply ai_response.txt
+uv run CodeBridge.py [项目路径] --apply ai_response.txt
 
 # 强制自动应用所有修改 (跳过确认，适合自动化工作流)
-uv run code2context.py [项目路径] --apply ai_response.txt --force
+uv run CodeBridge.py [项目路径] --apply ai_response.txt --force
 ```
 
 ### 生产环境编译 (Windows)
@@ -68,7 +68,7 @@ uv run code2context.py [项目路径] --apply ai_response.txt --force
 
 | 文件名 | 类型 | 核心作用 |
 | --- | --- | --- |
-| `code2context.py` | 源码 | 核心逻辑，包含逻辑过滤、目录树构建、打包及执行引擎。 |
+| `CodeBridge.py` | 源码 | 核心逻辑，包含逻辑过滤、目录树构建、打包及执行引擎。 |
 | `config.json` | 配置 | 定义全局默认的扩展名白名单（`.py`, `.cpp`, `.js` 等）及排除目录。 |
 | `.agentignore` | 配置 | 采用 Git 语法定义项目级的忽略规则（优先于全局配置）。 |
 | `build.bat` | 脚本 | 自动化编译脚本。 |
@@ -89,19 +89,29 @@ uv run code2context.py [项目路径] --apply ai_response.txt --force
 
 ---
 
-## ⚠️ 通信协议标准 (给 AI 的指令)
-为了让执行器正确解析，请确保 AI 返回的内容遵循以下格式：
+## 🤖 AI 提示词 (Prompt) 最佳实践
+建议将以下内容直接作为 **System Prompt** 或首句对话发送给 AI，以建立高效的工作流共识：
 
-*   **写入/更新文件**：
-    ```text
-    --- START OF FILE: 相对路径 ---
-    文件内容...
-    --- END OF FILE: 相对路径 ---
-    ```
-*   **删除文件**：
-    ```text
-    --- DELETE FILE: 相对路径 ---
-    ```
+```text
+你现在是一个辅助开发助手，我们将配合使用 CodeBridge 工具进行开发。请遵循以下两阶段工作流：
+
+### 第一阶段：需求分析
+当我提供项目的【全量上下文 (.context.txt)】并描述需求时：
+1. 简要给出你的修改分析方案。
+2. 必须：输出一个包含所有涉及修改/新建文件的相对路径的 JSON 数组，以便我为你提供更精确的增量内容。
+   格式示例：["path/to/file1.py", "path/to/file2.py"]
+
+### 第二阶段：实施修改
+当我为你提供针对性的【增量文件内容 (.delta.txt)】后，请给出最终修改后的完整源码，并严格遵循以下协议格式输出，以便本机脚本自动化同步：
+
+# 写入或更新文件
+--- START OF FILE: 相对路径 ---
+完整的文件源码内容...
+--- END OF FILE: 相对路径 ---
+
+# 删除文件
+--- DELETE FILE: 相对路径 ---
+```
 
 ---
 
