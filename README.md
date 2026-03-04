@@ -32,7 +32,7 @@
 
 如果你是 Windows 用户，可以直接下载预编译的单文件版本，无需安装 Python 环境：
 
-👉 **[下载最新 Release 版本 (v2.0)](https://github.com/CRThu/CodeMerge/releases/download/v2.0/code_merge.v2.0.exe)**
+👉 **[下载最新 Release 版本 (v3.0)](https://github.com/CRThu/CodeBridge/releases/download/v3.0/CodeBridge.v3.0.exe)**
 
 ### 交互模式 (推荐)
 直接双击 `CodeBridge.exe` 或运行 `python CodeBridge.py`（不带参数），根据屏幕提示进行：
