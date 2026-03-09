@@ -315,11 +315,18 @@ def main():
     print("=== CodeBridge 交互模式 ===")
     while True:
         project_path = input("\n1. 请输入项目根路径 (输入 'exit' 退出): ").strip()
-        if not project_path or project_path.lower() == 'exit':
+        
+        # 只有明确输入 exit 才退出
+        if project_path.lower() == 'exit':
             break
             
+        # 如果输入为空，则提示并重新循环，不要直接 break
+        if not project_path:
+            print("提示: 输入不能为空，请重新输入。")
+            continue
+            
         if not os.path.isdir(project_path):
-            print("错误: 路径无效，请重新输入")
+            print(f"错误: 路径 '{project_path}' 无效或不存在，请重新输入。")
             continue
         
         abs_project_path = os.path.abspath(project_path)
