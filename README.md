@@ -35,12 +35,13 @@
 👉 **[下载最新 Release 版本 (v3.0)](https://github.com/CRThu/CodeBridge/releases/download/v3.0/CodeBridge.v3.0.exe)**
 
 ### 交互模式 (推荐)
-直接双击 `CodeBridge.exe` 或运行 `python CodeBridge.py`（不带参数），根据屏幕提示进行：
-1. 输入路径
-2. 选择模式 (全量/增量/应用)
+直接双击 `CodeBridge.exe` 或运行 `uv run python CodeBridge.py`（不带参数），程序将引导你进行：
+1. **输入项目根路径** (输入一次，常驻生效)。
+2. **选择菜单编号** (全量/增量/Git Diff/应用 AI 修改)。
+3. **循环操作** (执行完某项后立即回到菜单，支持直到输入 7 退出)。
 
 ### 命令行模式
-推荐使用 `uv` 运行，系统将自动配置 `pathspec` 等依赖环境：
+推荐使用 `uv` 运行，系统将自动配置依赖环境：
 
 ```powershell
 # 全量打包
@@ -57,6 +58,13 @@ uv run CodeBridge.py [项目路径] --apply ai_response.txt
 
 # 强制自动应用所有修改 (跳过确认，适合自动化工作流)
 uv run CodeBridge.py [项目路径] --apply ai_response.txt --force
+
+# 导出 Git 修改区变更
+uv run CodeBridge.py [项目路径] --diff
+
+# 导出 Git 暂存区变更
+uv run CodeBridge.py [项目路径] --diff-staged
+
 ```
 
 ### 生产环境编译 (Windows)

@@ -11,6 +11,8 @@ import pathspec
 import sys
 import re
 import argparse
+import subprocess
+from datetime import datetime
 
 # --- 配置常量 ---
 CONFIG_FILE = "config.json"
@@ -160,6 +162,38 @@ def pack_project_code(root_dir, output_file, delta_files=None):
                     except Exception as e:
                         print(f"跳过文件 {rel_path}: {e}")
 
+def run_git_diff(root_dir, staged=False):
+    """导出 Git Diff 到项目父目录"""
+    abs_project_path = os.path.abspath(root_dir)
+    project_name = os.path.basename(os.path.normpath(abs_project_path))
+    parent_dir = os.path.dirname(os.path.normpath(abs_project_path))
+    output_file = os.path.join(parent_dir, f"{project_name}.gitdiff.txt")
+    
+    cmd = ["git", "diff"]
+    if staged:
+        cmd.append("--cached")
+    
+    try:
+        # 验证仓库
+        subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=root_dir, check=True, capture_output=True)
+        # 获取 Diff
+        result = subprocess.run(cmd, cwd=root_dir, check=True, capture_output=True, text=True, encoding='utf-8')
+        
+        header = f"\n{'='*20} GIT DIFF ({'STAGED' if staged else 'CHANGES'}) - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} {'='*20}\n"
+        
+        # 写入文件 (覆盖写入以保持纯净，符合 Spec 要求)
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write(header)
+            f.write(result.stdout)
+            
+        print(f"[+] Git Diff 已导出: {output_file}")
+    except FileNotFoundError:
+        print("错误: 系统未安装 Git。")
+    except subprocess.CalledProcessError:
+        print("错误: 该目录不是有效的 Git 仓库。")
+    except Exception as e:
+        print(f"导出 Git Diff 失败: {e}")
+
 def apply_ai_changes(root_dir, ai_res_file, force=False):
     """解析并安全应用 AI 修改"""
     if not os.path.exists(ai_res_file):
@@ -170,32 +204,30 @@ def apply_ai_changes(root_dir, ai_res_file, force=False):
     spec = get_path_spec(root_dir, config.get("default_exclude", []))
     allowed_exts = set(config.get("allowed_exts", []))
 
-    # AI 响应通常是 UTF-8
     content = smart_read(ai_res_file)
 
-    # 解析协议
+    # 协议解析 (START/END FILE)
     file_blocks = re.findall(r'--- START OF FILE: (.*?) ---\n(.*?)\n--- END OF FILE: \1 ---', content, re.DOTALL)
     deletions = re.findall(r'--- DELETE FILE: (.*?) ---', content)
 
     plan = []
     
     def is_safe(rel_path):
-        """三层安全检查"""
+        """安全沙箱校验"""
         norm_path = os.path.normpath(rel_path).replace('\\', '/')
         if norm_path.startswith("..") or os.path.isabs(norm_path):
-            return False, "路径越界攻击"
+            return False, "路径越界"
         if spec.match_file(norm_path):
-            return False, "被 .agentignore 或默认规则忽略"
-        # 允许创建新文件，但如果是已有文件，检查后缀
+            return False, "规则屏蔽"
         ext = os.path.splitext(norm_path)[1].lower()
         if ext and ext not in allowed_exts:
-             return False, "不支持的文件后缀"
+             return False, "后缀非法"
         return True, norm_path
 
     for path, body in file_blocks:
         safe, result = is_safe(path)
         if not safe:
-            print(f"跳过非法路径 {path}: {result}")
+            print(f"跳过路径 {path}: {result}")
             continue
         action = "UPDATE" if os.path.exists(os.path.join(root_dir, result)) else "NEW"
         plan.append((action, result, body))
@@ -203,13 +235,13 @@ def apply_ai_changes(root_dir, ai_res_file, force=False):
     for path in deletions:
         safe, result = is_safe(path)
         if not safe:
-            print(f"跳过非法删除请求 {path}: {result}")
+            print(f"跳过删除 {path}: {result}")
             continue
         if os.path.exists(os.path.join(root_dir, result)):
             plan.append(("DELETE", result, None))
 
     if not plan:
-        print("未发现有效修改清单。")
+        print("无有效修改。")
         return
 
     print("\n--- 待应用修改清单 ---")
@@ -226,8 +258,9 @@ def apply_ai_changes(root_dir, ai_res_file, force=False):
         full_path = os.path.join(root_dir, path)
         try:
             if action == "DELETE":
-                os.remove(full_path)
-                print(f"[已删除] {path}")
+                if os.path.exists(full_path):
+                    os.remove(full_path)
+                    print(f"[已删除] {path}")
             else:
                 os.makedirs(os.path.dirname(full_path), exist_ok=True)
                 with open(full_path, 'w', encoding='utf-8') as f:
@@ -236,74 +269,117 @@ def apply_ai_changes(root_dir, ai_res_file, force=False):
         except Exception as e:
             print(f"处理 {path} 失败: {e}")
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="code2context")
+def main():
+    parser = argparse.ArgumentParser(description="CodeBridge - 让本地代码与 AI 上下文无缝连接")
     parser.add_argument("path", nargs="?", help="项目根路径")
     parser.add_argument("--delta", help="增量列表 (JSON 数组或文件路径)")
     parser.add_argument("--apply", help="解析并应用 AI 结果文件")
     parser.add_argument("--force", action="store_true", help="强制执行 Apply 无需确认")
+    parser.add_argument("--diff", action="store_true", help="导出 Git 修改区 Diff (Changes)")
+    parser.add_argument("--diff-staged", action="store_true", help="导出 Git 暂存区 Diff (Staged)")
     
     args = parser.parse_args()
 
-    # 交互式菜单逻辑
-    project_path = args.path
-    mode = "pack" # 默认全量
-    delta_list = None
-    apply_file = args.apply
-    force = args.force
-
-    if not project_path:
-        print("=== code2context 交互模式 ===")
-        project_path = input("1. 请输入项目根路径: ").strip()
-        if not project_path or not os.path.isdir(project_path):
-            print("错误: 路径无效")
+    # 命令行直达逻辑
+    if args.path:
+        abs_project_path = os.path.abspath(args.path)
+        if not os.path.isdir(abs_project_path):
+            print(f"错误: 路径 {abs_project_path} 不存在")
             sys.exit(1)
-        
-        print("\n2. 请选择操作模式:")
-        print("   [1] 全量打包 (Full Pack)")
-        print("   [2] 增量提取 (Delta Pack)")
-        print("   [3] 应用 AI 修改 (Apply)")
-        print("   [4] 退出")
-        choice = input("请输入编号 [1]: ").strip() or "1"
-        
-        if choice == "2":
-            mode = "delta"
-            delta_input = input("请输入增量列表 (JSON 数组或 .json 文件): ").strip()
-            if os.path.exists(delta_input):
-                with open(delta_input, 'r', encoding='utf-8') as f:
-                    delta_list = json.load(f)
-            else:
-                delta_list = json.loads(delta_input.replace("'", '"'))
-        elif choice == "3":
-            mode = "apply"
-            apply_file = input("请输入 AI 结果文件名 (txt): ").strip()
-        elif choice == "4":
-            sys.exit(0)
-    else:
-        # 命令行模式下的逻辑判断
+            
+        project_name = os.path.basename(os.path.normpath(abs_project_path))
+        parent_dir = os.path.dirname(os.path.normpath(abs_project_path))
+
         if args.apply:
-            mode = "apply"
-        elif args.delta:
-            mode = "delta"
-            if os.path.exists(args.delta):
-                with open(args.delta, 'r', encoding='utf-8') as f:
-                    delta_list = json.load(f)
-            else:
-                delta_list = json.loads(args.delta.replace("'", '"'))
+            apply_ai_changes(abs_project_path, args.apply, force=args.force)
+        elif args.diff:
+            run_git_diff(abs_project_path, staged=False)
+        elif args.diff_staged:
+            run_git_diff(abs_project_path, staged=True)
+        else:
+            delta_list = None
+            if args.delta:
+                if os.path.exists(args.delta):
+                    with open(args.delta, 'r', encoding='utf-8') as f:
+                        delta_list = json.load(f)
+                else:
+                    delta_list = json.loads(args.delta.replace("'", '"'))
+            
+            output_suffix = "delta" if delta_list else "context"
+            output_file = os.path.join(parent_dir, f"{project_name}.{output_suffix}.txt")
+            pack_project_code(abs_project_path, output_file, delta_files=delta_list)
+            print(f"\n[+] 成功！打包文件已生成: {output_file}")
+        return
 
-    # 执行核心逻辑
-    abs_project_path = os.path.abspath(project_path)
-    project_name = os.path.basename(os.path.normpath(abs_project_path))
-    parent_dir = os.path.dirname(os.path.normpath(abs_project_path))
-
-    if mode == "apply":
-        apply_ai_changes(abs_project_path, apply_file, force=force)
-    else:
-        output_suffix = "context" if mode == "pack" else "delta"
-        output_file = os.path.join(parent_dir, f"{project_name}.{output_suffix}.txt")
-        pack_project_code(abs_project_path, output_file, delta_files=delta_list)
-        print(f"\n[+] 成功！打包文件已生成: {output_file}")
+    # 循环交互模式
+    print("=== CodeBridge 交互模式 ===")
+    while True:
+        project_path = input("\n1. 请输入项目根路径 (输入 'exit' 退出): ").strip()
+        if not project_path or project_path.lower() == 'exit':
+            break
+            
+        if not os.path.isdir(project_path):
+            print("错误: 路径无效，请重新输入")
+            continue
         
-    # 为了 EXE 运行不闪退，在交互模式下最后加个 pause
-    if not args.path:
-        input("\n任务结束，按回车退出...")
+        abs_project_path = os.path.abspath(project_path)
+        
+        # 功能菜单循环
+        while True:
+            print(f"\n当前项目: {abs_project_path}")
+            print("--- 功能菜单 ---")
+            print("   [1] 全量打包 (Full Pack)")
+            print("   [2] 增量提取 (Delta Pack)")
+            print("   [3] 导出 Git 暂存区 Diff (Staged)")
+            print("   [4] 导出 Git 修改区 Diff (Changes)")
+            print("   [5] 应用 AI 修改 (Apply)")
+            print("   [6] 切换项目路径")
+            print("   [7] 退出程序")
+            
+            choice = input("\n请选择编号 [1-7]: ").strip()
+            
+            if choice == "1":
+                project_name = os.path.basename(os.path.normpath(abs_project_path))
+                parent_dir = os.path.dirname(os.path.normpath(abs_project_path))
+                output_file = os.path.join(parent_dir, f"{project_name}.context.txt")
+                pack_project_code(abs_project_path, output_file)
+                print(f"\n[+] 全量打包完成: {output_file}")
+                
+            elif choice == "2":
+                delta_input = input("请输入增量列表 (JSON 数组或 .json 文件): ").strip()
+                try:
+                    if os.path.exists(delta_input):
+                        with open(delta_input, 'r', encoding='utf-8') as f:
+                            delta_list = json.load(f)
+                    else:
+                        delta_list = json.loads(delta_input.replace("'", '"'))
+                    
+                    project_name = os.path.basename(os.path.normpath(abs_project_path))
+                    parent_dir = os.path.dirname(os.path.normpath(abs_project_path))
+                    output_file = os.path.join(parent_dir, f"{project_name}.delta.txt")
+                    pack_project_code(abs_project_path, output_file, delta_files=delta_list)
+                    print(f"\n[+] 增量提取完成: {output_file}")
+                except Exception as e:
+                    print(f"错误: 增量列表解析失败: {e}")
+                    
+            elif choice == "3":
+                run_git_diff(abs_project_path, staged=True)
+                
+            elif choice == "4":
+                run_git_diff(abs_project_path, staged=False)
+                
+            elif choice == "5":
+                apply_file = input("请输入 AI 结果文件名 (txt): ").strip()
+                apply_ai_changes(abs_project_path, apply_file)
+                
+            elif choice == "6":
+                break # 直接返回上层输入路径
+                
+            elif choice == "7":
+                print("程序已退出。")
+                sys.exit(0)
+            else:
+                print("无效选项，请重新尝试。")
+
+if __name__ == "__main__":
+    main()
