@@ -64,7 +64,7 @@ def get_path_spec(project_dir, default_exclude):
         # 将简单的目录列表转换为 pathspec 规则
         return pathspec.PathSpec.from_lines('gitwildmatch', default_exclude)
 
-def build_dir_tree(root_dir, spec, allowed_exts, target_files=None):
+def build_dir_tree(root_dir, spec, allowed_exts, target_files=None, has_agentignore=False):
     """构建 JSON 格式目录树"""
     dir_tree = {}
     root_name = os.path.basename(root_dir)
@@ -84,8 +84,12 @@ def build_dir_tree(root_dir, spec, allowed_exts, target_files=None):
                 if rel_path in target_files:
                     valid_files.append(f)
             else:
-                if os.path.splitext(f)[1].lower() in allowed_exts and not spec.match_file(rel_path):
-                    valid_files.append(f)
+                if has_agentignore:
+                    if not spec.match_file(rel_path):
+                        valid_files.append(f)
+                else:
+                    if os.path.splitext(f)[1].lower() in allowed_exts and not spec.match_file(rel_path):
+                        valid_files.append(f)
         
         if not valid_files and not dirs:
             continue
@@ -120,6 +124,8 @@ def pack_project_code(root_dir, output_file, delta_files=None):
     config = load_config()
     allowed_exts = set(config.get("allowed_exts", []))
     
+    has_agentignore = os.path.exists(os.path.join(root_dir, IGNORE_FILE))
+    
     # 2. 获取匹配器 (优先 .agentignore)
     spec = get_path_spec(root_dir, config.get("default_exclude", []))
     
@@ -128,7 +134,7 @@ def pack_project_code(root_dir, output_file, delta_files=None):
     with open(output_file, 'w', encoding='utf-8') as f:
         # 1. 目录树
         print("正在生成目录结构...")
-        dir_tree = build_dir_tree(root_dir, spec, allowed_exts, target_files=delta_files)
+        dir_tree = build_dir_tree(root_dir, spec, allowed_exts, target_files=delta_files, has_agentignore=has_agentignore)
         f.write(f"//DIR_TREE_START\n{json.dumps(dir_tree, indent=2, ensure_ascii=False)}\n//DIR_TREE_END\n\n")
         
         # 2. 文件内容
@@ -148,9 +154,13 @@ def pack_project_code(root_dir, output_file, delta_files=None):
                     if rel_path in delta_files:
                         should_include = True
                 else:
-                    ext = os.path.splitext(file)[1].lower()
-                    if ext in allowed_exts and not spec.match_file(rel_path):
-                        should_include = True
+                    if has_agentignore:
+                        if not spec.match_file(rel_path):
+                            should_include = True
+                    else:
+                        ext = os.path.splitext(file)[1].lower()
+                        if ext in allowed_exts and not spec.match_file(rel_path):
+                            should_include = True
                 
                 if should_include:
                     full_path = os.path.join(root, file)
@@ -203,6 +213,7 @@ def apply_ai_changes(root_dir, ai_res_file, force=False):
     config = load_config()
     spec = get_path_spec(root_dir, config.get("default_exclude", []))
     allowed_exts = set(config.get("allowed_exts", []))
+    has_agentignore = os.path.exists(os.path.join(root_dir, IGNORE_FILE))
 
     content = smart_read(ai_res_file)
 
@@ -219,9 +230,10 @@ def apply_ai_changes(root_dir, ai_res_file, force=False):
             return False, "路径越界"
         if spec.match_file(norm_path):
             return False, "规则屏蔽"
-        ext = os.path.splitext(norm_path)[1].lower()
-        if ext and ext not in allowed_exts:
-             return False, "后缀非法"
+        if not has_agentignore:
+            ext = os.path.splitext(norm_path)[1].lower()
+            if ext and ext not in allowed_exts:
+                 return False, "后缀非法"
         return True, norm_path
 
     for path, body in file_blocks:
