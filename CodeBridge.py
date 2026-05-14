@@ -12,6 +12,7 @@ import sys
 import re
 import argparse
 import subprocess
+import functools
 from datetime import datetime
 
 # --- 配置常量 ---
@@ -51,20 +52,50 @@ def load_config():
     
     return default_config
 
-def get_path_spec(project_dir, default_exclude):
-    """优先解析项目目录下的 .agentignore，不存在则使用 config.json 中的排除列表"""
-    ignore_path = os.path.join(project_dir, IGNORE_FILE)
+@functools.lru_cache(maxsize=1024)
+def load_recursive_specs(root_dir, rel_dir, default_exclude_tuple):
+    """自底向上追溯，加载路径涉及的所有 .agentignore 规则"""
+    specs = []
+    has_explicit = False
+    current_dir = rel_dir
     
-    if os.path.exists(ignore_path):
-        print(f"检测到 {IGNORE_FILE}，正在应用规则...")
-        with open(ignore_path, 'r', encoding='utf-8') as f:
-            return pathspec.PathSpec.from_lines('gitwildmatch', f)
-    else:
-        print(f"未找到 {IGNORE_FILE}，使用 config.json 中的默认排除列表...")
-        # 将简单的目录列表转换为 pathspec 规则
-        return pathspec.PathSpec.from_lines('gitwildmatch', default_exclude)
+    while True:
+        ignore_path = os.path.join(root_dir, current_dir, IGNORE_FILE)
+        if os.path.exists(ignore_path):
+            with open(ignore_path, 'r', encoding='utf-8') as f:
+                specs.append((current_dir, pathspec.PathSpec.from_lines('gitwildmatch', f)))
+            has_explicit = True
+            
+        if current_dir == "":
+            break
+        current_dir = os.path.dirname(current_dir)
+        
+    if not has_explicit:
+        specs.append(("", pathspec.PathSpec.from_lines('gitwildmatch', default_exclude_tuple)))
+        
+    return specs, has_explicit
 
-def build_dir_tree(root_dir, spec, allowed_exts, target_files=None, has_agentignore=False):
+def get_applicable_spec(root_dir, rel_path, default_exclude):
+    """评估文件路径，返回 (是否被忽略, 是否受明文规则控制)"""
+    rel_path = rel_path.replace('\\', '/')
+    rel_dir = os.path.dirname(rel_path)
+    
+    specs, has_explicit = load_recursive_specs(root_dir, rel_dir, tuple(default_exclude))
+    
+    is_ignored = False
+    for base_dir, spec in specs:
+        rel_to_base = rel_path if base_dir == "" else os.path.relpath(rel_path, base_dir).replace('\\', '/')
+        if spec.match_file(rel_to_base):
+            is_ignored = True
+            break
+            
+    return is_ignored, has_explicit
+
+def clear_ignore_cache():
+    """每次执行前清理缓存，防止文件变更未同步"""
+    load_recursive_specs.cache_clear()
+
+def build_dir_tree(root_dir, default_exclude, allowed_exts, target_files=None):
     """构建 JSON 格式目录树"""
     dir_tree = {}
     root_name = os.path.basename(root_dir)
@@ -74,7 +105,7 @@ def build_dir_tree(root_dir, spec, allowed_exts, target_files=None, has_agentign
         if rel_root == ".": rel_root = ""
 
         # 过滤目录
-        dirs[:] = [d for d in dirs if not spec.match_file(os.path.join(rel_root, d))]
+        dirs[:] = [d for d in dirs if not get_applicable_spec(root_dir, os.path.join(rel_root, d), default_exclude)[0]]
         
         # 过滤文件
         valid_files = []
@@ -84,11 +115,12 @@ def build_dir_tree(root_dir, spec, allowed_exts, target_files=None, has_agentign
                 if rel_path in target_files:
                     valid_files.append(f)
             else:
-                if has_agentignore:
-                    if not spec.match_file(rel_path):
+                is_ignored, has_explicit = get_applicable_spec(root_dir, rel_path, default_exclude)
+                if has_explicit:
+                    if not is_ignored:
                         valid_files.append(f)
                 else:
-                    if os.path.splitext(f)[1].lower() in allowed_exts and not spec.match_file(rel_path):
+                    if os.path.splitext(f)[1].lower() in allowed_exts and not is_ignored:
                         valid_files.append(f)
         
         if not valid_files and not dirs:
@@ -123,18 +155,16 @@ def pack_project_code(root_dir, output_file, delta_files=None):
     """打包文件内容 (全量或增量)"""
     config = load_config()
     allowed_exts = set(config.get("allowed_exts", []))
+    default_exclude = config.get("default_exclude", [])
     
-    has_agentignore = os.path.exists(os.path.join(root_dir, IGNORE_FILE))
-    
-    # 2. 获取匹配器 (优先 .agentignore)
-    spec = get_path_spec(root_dir, config.get("default_exclude", []))
+    clear_ignore_cache()
     
     print(f"正在生成打包文件: {output_file}...")
     
     with open(output_file, 'w', encoding='utf-8') as f:
         # 1. 目录树
         print("正在生成目录结构...")
-        dir_tree = build_dir_tree(root_dir, spec, allowed_exts, target_files=delta_files, has_agentignore=has_agentignore)
+        dir_tree = build_dir_tree(root_dir, default_exclude, allowed_exts, target_files=delta_files)
         f.write(f"//DIR_TREE_START\n{json.dumps(dir_tree, indent=2, ensure_ascii=False)}\n//DIR_TREE_END\n\n")
         
         # 2. 文件内容
@@ -143,7 +173,7 @@ def pack_project_code(root_dir, output_file, delta_files=None):
             rel_root = os.path.relpath(root, root_dir)
             if rel_root == ".": rel_root = ""
 
-            dirs[:] = [d for d in dirs if not spec.match_file(os.path.join(rel_root, d))]
+            dirs[:] = [d for d in dirs if not get_applicable_spec(root_dir, os.path.join(rel_root, d), default_exclude)[0]]
             
             for file in files:
                 rel_path = os.path.join(rel_root, file).replace('\\', '/')
@@ -154,12 +184,13 @@ def pack_project_code(root_dir, output_file, delta_files=None):
                     if rel_path in delta_files:
                         should_include = True
                 else:
-                    if has_agentignore:
-                        if not spec.match_file(rel_path):
+                    is_ignored, has_explicit = get_applicable_spec(root_dir, rel_path, default_exclude)
+                    if has_explicit:
+                        if not is_ignored:
                             should_include = True
                     else:
                         ext = os.path.splitext(file)[1].lower()
-                        if ext in allowed_exts and not spec.match_file(rel_path):
+                        if ext in allowed_exts and not is_ignored:
                             should_include = True
                 
                 if should_include:
@@ -211,9 +242,10 @@ def apply_ai_changes(root_dir, ai_res_file, force=False):
         return
 
     config = load_config()
-    spec = get_path_spec(root_dir, config.get("default_exclude", []))
     allowed_exts = set(config.get("allowed_exts", []))
-    has_agentignore = os.path.exists(os.path.join(root_dir, IGNORE_FILE))
+    default_exclude = config.get("default_exclude", [])
+    
+    clear_ignore_cache()
 
     content = smart_read(ai_res_file)
 
@@ -228,9 +260,10 @@ def apply_ai_changes(root_dir, ai_res_file, force=False):
         norm_path = os.path.normpath(rel_path).replace('\\', '/')
         if norm_path.startswith("..") or os.path.isabs(norm_path):
             return False, "路径越界"
-        if spec.match_file(norm_path):
+        is_ignored, has_explicit = get_applicable_spec(root_dir, norm_path, default_exclude)
+        if is_ignored:
             return False, "规则屏蔽"
-        if not has_agentignore:
+        if not has_explicit:
             ext = os.path.splitext(norm_path)[1].lower()
             if ext and ext not in allowed_exts:
                  return False, "后缀非法"
