@@ -72,6 +72,9 @@ def load_recursive_specs(root_dir, rel_dir, default_exclude_tuple):
         
     if not has_explicit:
         specs.append(("", pathspec.PathSpec.from_lines('gitwildmatch', default_exclude_tuple)))
+    else:
+        # 即使有 .agentignore，也隐式排除 .git，保持与 gitignore 行为一致
+        specs.append(("", pathspec.PathSpec.from_lines('gitwildmatch', ['.git'])))
         
     return specs, has_explicit
 
